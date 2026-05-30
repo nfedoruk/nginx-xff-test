@@ -1,0 +1,9 @@
+all:
+  hosts:
+    xff-server:
+      ansible_host: 5.42.116.4
+      ansible_user: root
+      ansible_ssh_private_key_file: ~/.ssh/id_rsa
+  vars:
+    project_dir: /opt/ansible-nginx-xff
+    server_ip: "5.42.116.4"

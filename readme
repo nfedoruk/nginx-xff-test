@@ -1,0 +1,15 @@
+# X-Forwarded-For тестовый стенд
+
+## Что нужно заменить перед запуском
+
+### 1. Файл `inventory.yml`
+
+Замените 3 значения:
+
+```yaml
+all:
+  hosts:
+    xff-server:
+      ansible_host: 5.42.116.4          # ← ЗАМЕНИТЕ на IP вашего сервера
+      ansible_user: root                 # ← ЗАМЕНИТЕ на вашего пользователя (root или другой)
+      ansible_ssh_private_key_file: ~/.ssh/id_rsa  # ← ЗАМЕНИТЕ путь к вашему SSH ключу

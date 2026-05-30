@@ -1,0 +1,198 @@
+---
+- name: Deploy X-Forwarded-For test environment
+  hosts: xff-server
+  gather_facts: yes
+  
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install Docker and tools
+      apt:
+        name:
+          - docker.io
+          - docker-compose
+          - curl
+          - jq
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Create project directory on server
+      file:
+        path: /opt/ansible-nginx-xff
+        state: directory
+        mode: '0755'
+
+    - name: Create nginx configs directory on server
+      file:
+        path: /opt/ansible-nginx-xff/nginx_configs
+        state: directory
+        mode: '0755'
+
+    - name: Create app directory on server
+      file:
+        path: /opt/ansible-nginx-xff/app
+        state: directory
+        mode: '0755'
+
+    - name: Copy nginx config for nginx1
+      copy:
+        content: |
+          server {
+              listen 80;
+              server_name nginx1;
+              access_log /dev/stdout;
+              error_log /dev/stderr;
+              location / {
+                  proxy_pass http://nginx2:80;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header Host $host;
+              }
+          }
+        dest: /opt/ansible-nginx-xff/nginx_configs/nginx1.conf
+
+    - name: Copy nginx config for nginx2
+      copy:
+        content: |
+          server {
+              listen 80;
+              server_name nginx2;
+              access_log /dev/stdout;
+              error_log /dev/stderr;
+              location / {
+                  proxy_pass http://nginx3:80;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header Host $host;
+              }
+          }
+        dest: /opt/ansible-nginx-xff/nginx_configs/nginx2.conf
+
+    - name: Copy nginx config for nginx3
+      copy:
+        content: |
+          server {
+              listen 80;
+              server_name nginx3;
+              access_log /dev/stdout;
+              error_log /dev/stderr;
+              location / {
+                  proxy_pass http://app:5000;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header Host $host;
+              }
+          }
+        dest: /opt/ansible-nginx-xff/nginx_configs/nginx3.conf
+
+    - name: Copy Flask app
+      copy:
+        content: |
+          from flask import Flask, request, jsonify
+          app = Flask(__name__)
+          @app.route('/')
+          @app.route('/<path:path>')
+          def index(path=''):
+              xff = request.headers.get('X-Forwarded-For', 'NOT PRESENT')
+              return jsonify({
+                  'message': 'X-Forwarded-For test',
+                  'xff_raw': xff,
+                  'xff_list': xff.split(', ') if xff != 'NOT PRESENT' else [],
+                  'real_ip': request.headers.get('X-Real-IP', 'NOT PRESENT'),
+                  'client_ip': request.remote_addr,
+                  'all_headers': dict(request.headers)
+              }), 200
+          if __name__ == '__main__':
+              app.run(host='0.0.0.0', port=5000)
+        dest: /opt/ansible-nginx-xff/app/app.py
+
+    - name: Create docker-compose.yml
+      copy:
+        content: |
+          version: '3.8'
+          services:
+            app:
+              image: python:3.11-slim
+              container_name: xff_app
+              working_dir: /app
+              volumes:
+                - /opt/ansible-nginx-xff/app:/app
+              command: sh -c "pip install flask && python app.py"
+              networks:
+                - xff_network
+              ports:
+                - "5000:5000"
+            nginx1:
+              image: nginx:alpine
+              container_name: nginx1
+              volumes:
+                - /opt/ansible-nginx-xff/nginx_configs/nginx1.conf:/etc/nginx/conf.d/default.conf:ro
+              networks:
+                - xff_network
+              ports:
+                - "8081:80"
+              depends_on:
+                - nginx2
+            nginx2:
+              image: nginx:alpine
+              container_name: nginx2
+              volumes:
+                - /opt/ansible-nginx-xff/nginx_configs/nginx2.conf:/etc/nginx/conf.d/default.conf:ro
+              networks:
+                - xff_network
+              ports:
+                - "8082:80"
+              depends_on:
+                - nginx3
+            nginx3:
+              image: nginx:alpine
+              container_name: nginx3
+              volumes:
+                - /opt/ansible-nginx-xff/nginx_configs/nginx3.conf:/etc/nginx/conf.d/default.conf:ro
+              networks:
+                - xff_network
+              ports:
+                - "8083:80"
+              depends_on:
+                - app
+          networks:
+            xff_network:
+              driver: bridge
+        dest: /opt/ansible-nginx-xff/docker-compose.yml
+
+    - name: Start Docker Compose
+      docker_compose:
+        project_src: /opt/ansible-nginx-xff
+        state: present
+        restarted: yes
+
+    - name: Wait for services
+      wait_for:
+        port: "{{ item }}"
+        host: "5.42.116.4"
+        delay: 5
+        timeout: 60
+      loop:
+        - 5000
+        - 8081
+        - 8082
+        - 8083
+
+    - name: Show success message
+      debug:
+        msg:
+          - "✅ Deployment complete!"
+          - "📡 Server IP: 5.42.116.4"
+          - "📍 Direct app: http://5.42.116.4:5000"
+          - "📍 Through nginx1: http://5.42.116.4:8081"
+          - "📍 Through nginx2: http://5.42.116.4:8082"
+          - "📍 Through nginx3: http://5.42.116.4:8083"
