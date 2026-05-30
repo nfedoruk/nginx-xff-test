@@ -2,10 +2,4 @@ ansible-nginx-xff/
 ├── ansible.cfg
 ├── inventory.yml
 ├── playbook.yml
-├── docker-compose.yml.j2
-├── nginx/
-│   └── nginx.conf.j2
-├── app/
-│   └── app.py
 ├── test.sh
-└── verify_remote.sh
